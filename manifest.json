@@ -1,0 +1,8 @@
+{
+  "name": "Send Anyway",
+  "description": "Keeps the chat box and send button visible in locked channels",
+  "authors": [{ "name": "Abas2" }],
+  "main": "index.js",
+  "hash": "badfed90e037d32e31d38abf313d1810fdd8d6fe83042cdf3db3d122b1c7b350",
+  "vendetta": { "icon": "ic_message" }
+}
