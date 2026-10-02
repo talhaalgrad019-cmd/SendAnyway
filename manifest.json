@@ -3,6 +3,6 @@
   "description": "Turns the Explore button on locked channels into an Unlock button",
   "authors": [{ "name": "Abas2" }],
   "main": "index.js",
-  "hash": "c6538e3ca81ce670965b9353777230d98c66e87ea905e7225848b18658af8122",
+  "hash": "bda206fadbfc39c89ddc65d1ac39cfaf5fc1e39003bf9db87e3a2dee108c5940",
   "vendetta": { "icon": "ic_message" }
 }
