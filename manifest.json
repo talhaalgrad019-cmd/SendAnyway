@@ -1,8 +1,8 @@
 {
   "name": "Send Anyway",
-  "description": "Tap the Done reading bar 3 times to unlock the chat box in locked channels",
+  "description": "Adds an Unlock button to the Done reading bar so you can type in locked channels",
   "authors": [{ "name": "Abas2" }],
   "main": "index.js",
-  "hash": "6800ad0d46462b67893b097ef4ae0e148fb3f32d82b2e4df43c95052cb454f72",
+  "hash": "8cd9c6bcff76b76754859a324f241eeb62fc130f200ed682bea64c63679e8386",
   "vendetta": { "icon": "ic_message" }
 }
