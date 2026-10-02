@@ -1,67 +1,74 @@
 (function () {
   "use strict";
 
-  const { findByStoreName, findByProps } = vendetta.metro;
-  const { after } = vendetta.patcher;
+  const modules = vendetta.metro.modules;
+  const PATTERN = /done.?reading|next.?channel|read.?only/i;
+  const MAX_RESULTS = 8;
 
-  // SEND_MESSAGES permission bit (1 << 11). Works for both Number and BigInt.
-  const SEND_MESSAGES = 2048;
-
-  // Set to true to log permission checks in the debug console
-  const DEBUG = false;
-
-  const unpatches = [];
-  const patched = new Set();
-
-  function isSendMessages(perm) {
+  function check(exp, id, key, results) {
+    if (typeof exp !== "function" || results.length >= MAX_RESULTS) return;
+    let src;
     try {
-      return perm == SEND_MESSAGES;
+      src = Function.prototype.toString.call(exp);
     } catch (e) {
-      return false;
+      return;
     }
+    const m = src.match(PATTERN);
+    if (!m) return;
+    const start = Math.max(0, m.index - 100);
+    results.push({
+      module: id,
+      export: key,
+      name: exp.displayName || exp.name || "",
+      match: m[0],
+      snippet: src.slice(start, start + 260),
+    });
   }
 
-  function patchCan(target, label) {
-    if (!target || typeof target.can !== "function" || patched.has(target)) return;
-    patched.add(target);
-    unpatches.push(
-      after("can", target, function (args, ret) {
-        if (isSendMessages(args && args[0])) {
-          if (DEBUG) console.log("[SendAnyway] forced SEND_MESSAGES via", label);
-          return true;
+  function scan() {
+    const results = [];
+    try {
+      for (const id in modules) {
+        if (results.length >= MAX_RESULTS) break;
+        const mod = modules[id];
+        if (!mod || !mod.isInitialized) continue;
+        let exp;
+        try {
+          exp = mod.publicModule && mod.publicModule.exports;
+        } catch (e) {
+          continue;
         }
-        return ret;
-      })
-    );
-  }
-
-  function applyPatches() {
-    try {
-      patchCan(findByStoreName("PermissionStore"), "PermissionStore");
+        if (!exp) continue;
+        check(exp, id, "module", results);
+        try { if (exp.default) check(exp.default, id, "default", results); } catch (e) {}
+        if (typeof exp === "object") {
+          let keys = [];
+          try { keys = Object.keys(exp); } catch (e) {}
+          for (const k of keys) {
+            if (k === "default") continue;
+            try { check(exp[k], id, k, results); } catch (e) {}
+          }
+        }
+      }
     } catch (e) {
-      console.error("[SendAnyway] PermissionStore patch failed", e);
+      console.error("[ChatBarFinder] scan failed", e);
     }
 
+    console.log("[ChatBarFinder] found " + results.length + " candidates:\n" + JSON.stringify(results, null, 2));
     try {
-      patchCan(findByProps("can", "computePermissions"), "PermissionUtils");
-    } catch (e) {
-      console.error("[SendAnyway] PermissionUtils patch failed", e);
-    }
-
-    if (!patched.size) console.error("[SendAnyway] no permission module found");
+      vendetta.ui.toasts.showToast("ChatBarFinder: " + results.length + " candidates (see debug console)");
+    } catch (e) {}
   }
+
+  let timer;
 
   return {
     default: {
       onLoad: function () {
-        applyPatches();
+        timer = setTimeout(scan, 1500);
       },
       onUnload: function () {
-        unpatches.forEach(function (u) {
-          try { u(); } catch (e) {}
-        });
-        unpatches.length = 0;
-        patched.clear();
+        clearTimeout(timer);
       },
     },
     __esModule: true,
