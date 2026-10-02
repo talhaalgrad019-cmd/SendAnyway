@@ -4,17 +4,14 @@
   const { findByProps, findByStoreName } = vendetta.metro;
   const { instead, after } = vendetta.patcher;
   const React = vendetta.metro.common.React;
+  const RN = vendetta.metro.common.ReactNative;
 
-  const TAPS_NEEDED = 3;
-  const TAP_WINDOW_MS = 2000;
   const SEND_MESSAGES = 2048; // permission bit (1 << 11)
   const PRESS_KEY = /^on(press|click|tap|select)$/i;
 
   const unpatches = [];
   const unlocked = {}; // channelId -> true
   const status = {};
-  let tapCount = 0;
-  let tapTimer = null;
   let lastSummary = null;
   let PermissionStore = null;
   let SelectedChannelStore = null;
@@ -65,13 +62,10 @@
     }
   }
 
-  function onCtaTap() {
-    tapCount++;
-    clearTimeout(tapTimer);
-    tapTimer = setTimeout(function () { tapCount = 0; }, TAP_WINDOW_MS);
-    if (tapCount < TAPS_NEEDED) return;
-    tapCount = 0;
+  // Tapping the bar itself does nothing now (no jump to the other channel)
+  function blockTap() {}
 
+  function unlockChannel() {
     const id = currentChannelId();
     if (!id) {
       toast("SendAnyway: no channel found");
@@ -85,6 +79,29 @@
     copy(JSON.stringify({ status: status, channel: id, cta: lastSummary }, null, 1));
   }
 
+  function withUnlockButton(out) {
+    if (!RN || !RN.View || !RN.TouchableOpacity || !RN.Text) return out;
+    return React.createElement(
+      RN.View,
+      { style: { flexDirection: "row", alignItems: "center" } },
+      React.createElement(RN.View, { style: { flex: 1 } }, out),
+      React.createElement(
+        RN.TouchableOpacity,
+        {
+          onPress: unlockChannel,
+          style: {
+            marginHorizontal: 8,
+            paddingHorizontal: 14,
+            paddingVertical: 10,
+            borderRadius: 8,
+            backgroundColor: "#5865F2",
+          },
+        },
+        React.createElement(RN.Text, { style: { color: "#FFFFFF", fontWeight: "600" } }, "Unlock")
+      )
+    );
+  }
+
   function isPlain(v) {
     return v && typeof v === "object" && !Array.isArray(v) &&
       !(React.isValidElement && React.isValidElement(v)) &&
@@ -96,7 +113,7 @@
     const out = Object.assign({}, obj);
     Object.keys(obj).forEach(function (k) {
       const v = obj[k];
-      if (PRESS_KEY.test(k) && typeof v === "function") out[k] = onCtaTap;
+      if (PRESS_KEY.test(k) && typeof v === "function") out[k] = blockTap;
       else if (isPlain(v)) out[k] = overrideProps(v, depth + 1);
     });
     return out;
@@ -112,7 +129,7 @@
     Object.keys(p).forEach(function (k) {
       const v = p[k];
       if (PRESS_KEY.test(k) && typeof v === "function") {
-        np[k] = onCtaTap;
+        np[k] = blockTap;
         changed = true;
       } else if (k === "children") {
         const c = rewriteElement(v, depth + 1);
@@ -154,7 +171,7 @@
       status.perm = "error: " + e;
     }
 
-    // 2) The "Done reading? Check out #channel" bar: count taps, block navigation
+    // 2) The "Done reading? Check out #channel" bar: block navigation, add an Unlock button
     try {
       const holder = findByProps("TextAreaCta");
       if (holder && typeof holder.TextAreaCta === "function") {
@@ -163,7 +180,7 @@
             lastSummary = summarize(args[0]);
             const rest = Array.prototype.slice.call(args, 1);
             const out = orig.apply(this, [overrideProps(args[0], 0)].concat(rest));
-            return rewriteElement(out, 0);
+            return withUnlockButton(rewriteElement(out, 0));
           })
         );
         status.cta = "patched";
@@ -183,7 +200,6 @@
         applyPatches();
       },
       onUnload: function () {
-        clearTimeout(tapTimer);
         unpatches.forEach(function (u) {
           try { u(); } catch (e) {}
         });
