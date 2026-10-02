@@ -3,6 +3,6 @@
   "description": "Adds an Unlock button to the Done reading bar so you can type in locked channels",
   "authors": [{ "name": "Abas2" }],
   "main": "index.js",
-  "hash": "8cd9c6bcff76b76754859a324f241eeb62fc130f200ed682bea64c63679e8386",
+  "hash": "2de7fa1ae674604da253e7dc43863fe0a57a1fdd33c192e18f6012dbc373824e",
   "vendetta": { "icon": "ic_message" }
 }
