@@ -1,8 +1,8 @@
 {
-  "name": "Send Anyway",
-  "description": "Keeps the chat box and send button visible in locked channels",
+  "name": "Chat Bar Finder",
+  "description": "Finds the Done reading bar component (debug tool)",
   "authors": [{ "name": "Abas2" }],
   "main": "index.js",
-  "hash": "badfed90e037d32e31d38abf313d1810fdd8d6fe83042cdf3db3d122b1c7b350",
-  "vendetta": { "icon": "ic_message" }
+  "hash": "ef1ccc40aa869e59258e4ae187f6d04b4d9c99ed3974d9e40c6e813a98863f8a",
+  "vendetta": { "icon": "ic_search" }
 }
