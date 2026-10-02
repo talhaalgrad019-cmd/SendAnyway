@@ -2,7 +2,7 @@
   "use strict";
 
   const { findByProps, findByStoreName } = vendetta.metro;
-  const { instead, after } = vendetta.patcher;
+  const { instead, after, before } = vendetta.patcher;
   const React = vendetta.metro.common.React;
   const RN = vendetta.metro.common.ReactNative;
 
@@ -142,6 +142,56 @@
     return changed ? React.cloneElement(node, np) : node;
   }
 
+  // 3) Probe: capture the call stack when the "Done reading" text gets rendered
+  const captures = [];
+
+  function textOf(c) {
+    if (typeof c === "string") return c;
+    if (Array.isArray(c)) {
+      let s = "";
+      for (let i = 0; i < c.length && i < 6; i++) if (typeof c[i] === "string") s += c[i];
+      return s;
+    }
+    return "";
+  }
+
+  function maybeCapture(props, rest) {
+    if (captures.length >= 2) return;
+    let t = props ? textOf(props.children) : "";
+    if (!t && rest && rest.length) t = textOf(rest);
+    if (!/done reading/i.test(t)) return;
+    let stack = "";
+    try {
+      stack = String(new Error().stack).split("\n").slice(0, 25).join("\n");
+    } catch (e) {}
+    captures.push(stack);
+    copy("[SendAnyway probe]\n" + captures.join("\n----\n"));
+    toast("Probe captured " + captures.length + " (copied to clipboard)");
+  }
+
+  function installProbe() {
+    try {
+      const JSX = findByProps("jsx", "jsxs");
+      if (JSX) {
+        ["jsx", "jsxs"].forEach(function (k) {
+          if (typeof JSX[k] === "function") {
+            unpatches.push(before(k, JSX, function (args) { maybeCapture(args[1]); }));
+          }
+        });
+      }
+      if (React && typeof React.createElement === "function") {
+        unpatches.push(
+          before("createElement", React, function (args) {
+            maybeCapture(args[1], Array.prototype.slice.call(args, 2));
+          })
+        );
+      }
+      status.probe = "on";
+    } catch (e) {
+      status.probe = "error: " + e;
+    }
+  }
+
   function applyPatches() {
     try {
       PermissionStore = findByStoreName("PermissionStore");
@@ -191,7 +241,9 @@
       status.cta = "error: " + e;
     }
 
-    toast("SendAnyway: cta=" + status.cta + ", perm=" + status.perm);
+    installProbe();
+
+    toast("SendAnyway: cta=" + status.cta + ", perm=" + status.perm + ", probe=" + status.probe);
   }
 
   return {
