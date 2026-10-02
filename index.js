@@ -151,12 +151,19 @@
     }
   }
 
+  // Modules we've already scanned (so retries stay cheap)
+  const checked = {};
+  let retryTimer = null;
+  let announced = false;
+
   // Finds the module that exports a function with the given name
   function findHolder(name) {
     const modules = vendetta.metro.modules;
     for (const id in modules) {
+      if (checked[id]) continue;
       const mod = modules[id];
       if (!mod || !mod.isInitialized) continue;
+      checked[id] = true;
       let exp;
       try {
         exp = mod.publicModule && mod.publicModule.exports;
@@ -183,98 +190,113 @@
     return null;
   }
 
-  function applyPatches() {
+  // 1) Permission check: only fake SEND_MESSAGES in channels the user unlocked
+  function patchPermissions() {
+    if (status.perm === "patched") return true;
     try {
-      PermissionStore = findByStoreName("PermissionStore");
-      SelectedChannelStore = findByStoreName("SelectedChannelStore");
-    } catch (e) {}
-
-    // 1) Permission check: only fake SEND_MESSAGES in channels the user unlocked
-    try {
-      if (PermissionStore && typeof PermissionStore.can === "function") {
-        unpatches.push(
-          after("can", PermissionStore, function (args, ret) {
-            try {
-              if (args[0] == SEND_MESSAGES) {
-                const ch = args[1];
-                const id = ch && (ch.id || ch);
-                if (id && unlocked[id]) return true;
-              }
-            } catch (e) {}
-            return ret;
-          })
-        );
-        status.perm = "patched";
-      } else {
-        status.perm = "PermissionStore.can not found";
-      }
+      PermissionStore = PermissionStore || findByStoreName("PermissionStore");
+      SelectedChannelStore = SelectedChannelStore || findByStoreName("SelectedChannelStore");
+      if (!PermissionStore || typeof PermissionStore.can !== "function") return false;
+      unpatches.push(
+        after("can", PermissionStore, function (args, ret) {
+          try {
+            if (args[0] == SEND_MESSAGES) {
+              const ch = args[1];
+              const id = ch && (ch.id || ch);
+              if (id && unlocked[id]) return true;
+            }
+          } catch (e) {}
+          return ret;
+        })
+      );
+      status.perm = "patched";
+      return true;
     } catch (e) {
       status.perm = "error: " + e;
+      return false;
     }
+  }
 
-    installBarDetector();
-
-    // 2) ChatInputGuard: draws the "Done reading?" bar instead of the chat box
+  // 2) ChatInputGuard: draws the "Done reading?" bar instead of the chat box
+  function patchGuard() {
+    if (status.guard === "patched") return true;
     try {
-      let found = findHolder("ChatInputGuard");
-      if (!found) {
-        const m = vendetta.metro.findByName("ChatInputGuard", false);
-        if (m) found = { holder: m, key: "default", id: "findByName" };
-      }
-      if (found) {
-        unpatches.push(
-          instead(found.key, found.holder, function (args, orig) {
-            const props = args[0];
+      const found = findHolder("ChatInputGuard");
+      if (!found) return false;
+      unpatches.push(
+        instead(found.key, found.holder, function (args, orig) {
+          const props = args[0];
 
-            // "Done reading? ... [Explore]" bar: turn its button into the Unlock button
-            if (props && props.type === "simple-action" && typeof props.actionOnPress === "function") {
-              const patchedProps = Object.assign({}, props, {
-                actionLabel: "Unlock",
-                actionOnPress: unlockChannel,
-              });
-              return orig.apply(this, [patchedProps].concat(Array.prototype.slice.call(args, 1)));
-            }
+          // "Done reading? ... [Explore]" bar: turn its button into the Unlock button
+          if (props && props.type === "simple-action" && typeof props.actionOnPress === "function") {
+            const patchedProps = Object.assign({}, props, {
+              actionLabel: "Unlock",
+              actionOnPress: unlockChannel,
+            });
+            return orig.apply(this, [patchedProps].concat(Array.prototype.slice.call(args, 1)));
+          }
 
-            // Any other blocking bar: detect it and add a separate Unlock button
-            const wasArmed = armed;
-            armed = true;
-            barSeen = false;
-            let out;
-            try {
-              out = orig.apply(this, args);
-            } finally {
-              armed = wasArmed;
-            }
-            const blocked = barSeen;
-            barSeen = false;
-            if (!blocked) return out;
+          // Any other blocking bar: detect it and add a separate Unlock button
+          const wasArmed = armed;
+          armed = true;
+          barSeen = false;
+          let out;
+          try {
+            out = orig.apply(this, args);
+          } finally {
+            armed = wasArmed;
+          }
+          const blocked = barSeen;
+          barSeen = false;
+          if (!blocked) return out;
 
-            const id = currentChannelId();
-            if (id && unlocked[id]) {
-              if (props && props.children != null) return props.children;
-              return out;
-            }
-            return withUnlockButton(rewriteElement(out, 0));
-          })
-        );
-        status.guard = "patched";
-      } else {
-        status.guard = "ChatInputGuard not found";
-      }
+          const id = currentChannelId();
+          if (id && unlocked[id]) {
+            if (props && props.children != null) return props.children;
+            return out;
+          }
+          return withUnlockButton(rewriteElement(out, 0));
+        })
+      );
+      status.guard = "patched";
+      return true;
     } catch (e) {
       status.guard = "error: " + e;
+      return false;
     }
+  }
 
-    toast("SendAnyway: guard=" + status.guard + ", perm=" + status.perm);
+  // Chat modules load lazily after startup, so keep retrying until both patches land
+  function tryPatch() {
+    const permOk = patchPermissions();
+    const guardOk = patchGuard();
+    if (permOk && guardOk) {
+      if (retryTimer) {
+        clearInterval(retryTimer);
+        retryTimer = null;
+      }
+      if (!announced) {
+        announced = true;
+        toast("SendAnyway: ready");
+      }
+    }
   }
 
   return {
     default: {
       onLoad: function () {
-        applyPatches();
+        installBarDetector();
+        tryPatch();
+        if (!announced) {
+          retryTimer = setInterval(tryPatch, 2000);
+        }
       },
       onUnload: function () {
         armed = false;
+        if (retryTimer) {
+          clearInterval(retryTimer);
+          retryTimer = null;
+        }
         unpatches.forEach(function (u) {
           try { u(); } catch (e) {}
         });
