@@ -13,7 +13,6 @@
   const unpatches = [];
   const unlocked = {}; // channelId -> true
   const status = {};
-  let lastSummary = null;
   let PermissionStore = null;
   let SelectedChannelStore = null;
 
@@ -23,40 +22,6 @@
 
   function toast(msg) {
     try { vendetta.ui.toasts.showToast(msg); } catch (e) {}
-  }
-
-  function copy(text) {
-    try {
-      const cb = findByProps("setString");
-      if (cb && cb.setString) cb.setString(text);
-    } catch (e) {}
-  }
-
-  function summarize(v, depth) {
-    depth = depth || 0;
-    if (v == null) return v;
-    const t = typeof v;
-    if (t === "string") return v.slice(0, 80);
-    if (t === "number" || t === "boolean") return v;
-    if (t === "bigint") return String(v) + "n";
-    if (t === "function") return "[fn " + (v.name || "") + "]";
-    if (depth > 3) return "[deep]";
-    if (React.isValidElement && React.isValidElement(v)) {
-      const ty = v.type;
-      return {
-        "<el>": typeof ty === "string" ? ty : (ty && (ty.displayName || ty.name)) || "?",
-        props: summarize(v.props, depth + 1),
-      };
-    }
-    if (Array.isArray(v)) return v.slice(0, 6).map(function (x) { return summarize(x, depth + 1); });
-    if (t === "object") {
-      const o = {};
-      Object.keys(v).slice(0, 15).forEach(function (k) {
-        try { o[k] = summarize(v[k], depth + 1); } catch (e) {}
-      });
-      return o;
-    }
-    return String(v);
   }
 
   function currentChannelId() {
@@ -80,8 +45,7 @@
     try {
       if (PermissionStore && PermissionStore.emitChange) PermissionStore.emitChange();
     } catch (e) {}
-    toast("Chat box unlocked. If it doesn't show, leave and re-enter the channel.");
-    copy(JSON.stringify({ status: status, channel: id, guard: lastSummary }, null, 1));
+    toast("Unlocked. Re-enter the channel if the chat box doesn't show.");
   }
 
   function withUnlockButton(out) {
@@ -261,7 +225,17 @@
         unpatches.push(
           instead(found.key, found.holder, function (args, orig) {
             const props = args[0];
-            lastSummary = summarize(props);
+
+            // "Done reading? ... [Explore]" bar: turn its button into the Unlock button
+            if (props && props.type === "simple-action" && typeof props.actionOnPress === "function") {
+              const patchedProps = Object.assign({}, props, {
+                actionLabel: "Unlock",
+                actionOnPress: unlockChannel,
+              });
+              return orig.apply(this, [patchedProps].concat(Array.prototype.slice.call(args, 1)));
+            }
+
+            // Any other blocking bar: detect it and add a separate Unlock button
             const wasArmed = armed;
             armed = true;
             barSeen = false;
@@ -277,7 +251,6 @@
 
             const id = currentChannelId();
             if (id && unlocked[id]) {
-              // permission patch didn't remove the bar: show the real chat box ourselves
               if (props && props.children != null) return props.children;
               return out;
             }
