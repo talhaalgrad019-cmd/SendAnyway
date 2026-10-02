@@ -54,9 +54,22 @@
       console.error("[ChatBarFinder] scan failed", e);
     }
 
-    console.log("[ChatBarFinder] found " + results.length + " candidates:\n" + JSON.stringify(results, null, 2));
+    const text = "[ChatBarFinder] found " + results.length + " candidates:\n" + JSON.stringify(results, null, 2);
+    console.log(text);
+
+    let copied = false;
     try {
-      vendetta.ui.toasts.showToast("ChatBarFinder: " + results.length + " candidates (see debug console)");
+      const cb = vendetta.metro.findByProps("setString");
+      if (cb && cb.setString) {
+        cb.setString(text);
+        copied = true;
+      }
+    } catch (e) {}
+
+    try {
+      vendetta.ui.toasts.showToast(
+        "ChatBarFinder: " + results.length + " candidates" + (copied ? ", copied to clipboard" : "")
+      );
     } catch (e) {}
   }
 
