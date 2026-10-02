@@ -1,8 +1,8 @@
 {
   "name": "Send Anyway",
-  "description": "Adds an Unlock button to the Done reading bar so you can type in locked channels",
+  "description": "Turns the Explore button on locked channels into an Unlock button",
   "authors": [{ "name": "Abas2" }],
   "main": "index.js",
-  "hash": "563efb0ec114aeb648e7db24a9b13a1201a61ceef3a3c0bf69c5f3c6e42e2bc4",
+  "hash": "c6538e3ca81ce670965b9353777230d98c66e87ea905e7225848b18658af8122",
   "vendetta": { "icon": "ic_message" }
 }
