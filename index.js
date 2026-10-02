@@ -8,6 +8,7 @@
 
   const SEND_MESSAGES = 2048; // permission bit (1 << 11)
   const PRESS_KEY = /^on(press|click|tap|select)$/i;
+  const BAR_TEXT = /done reading|permission to send|cannot send|can't send|read.?only/i;
 
   const unpatches = [];
   const unlocked = {}; // channelId -> true
@@ -15,6 +16,10 @@
   let lastSummary = null;
   let PermissionStore = null;
   let SelectedChannelStore = null;
+
+  // set while ChatInputGuard renders, so we can tell if it drew the blocking bar
+  let armed = false;
+  let barSeen = false;
 
   function toast(msg) {
     try { vendetta.ui.toasts.showToast(msg); } catch (e) {}
@@ -62,7 +67,7 @@
     }
   }
 
-  // Tapping the bar itself does nothing now (no jump to the other channel)
+  // Tapping the bar itself does nothing (no jump to the other channel)
   function blockTap() {}
 
   function unlockChannel() {
@@ -76,7 +81,7 @@
       if (PermissionStore && PermissionStore.emitChange) PermissionStore.emitChange();
     } catch (e) {}
     toast("Chat box unlocked. If it doesn't show, leave and re-enter the channel.");
-    copy(JSON.stringify({ status: status, channel: id, cta: lastSummary }, null, 1));
+    copy(JSON.stringify({ status: status, channel: id, guard: lastSummary }, null, 1));
   }
 
   function withUnlockButton(out) {
@@ -142,9 +147,7 @@
     return changed ? React.cloneElement(node, np) : node;
   }
 
-  // 3) Probe: capture the call stack when the "Done reading" text gets rendered
-  const captures = [];
-
+  // Detects the bar's text being created while ChatInputGuard is rendering
   function textOf(c) {
     if (typeof c === "string") return c;
     if (Array.isArray(c)) {
@@ -155,41 +158,65 @@
     return "";
   }
 
-  function maybeCapture(props, rest) {
-    if (captures.length >= 2) return;
+  function markBar(props, rest) {
+    if (!armed || barSeen) return;
     let t = props ? textOf(props.children) : "";
     if (!t && rest && rest.length) t = textOf(rest);
-    if (!/done reading/i.test(t)) return;
-    let stack = "";
-    try {
-      stack = String(new Error().stack).split("\n").slice(0, 25).join("\n");
-    } catch (e) {}
-    captures.push(stack);
-    copy("[SendAnyway probe]\n" + captures.join("\n----\n"));
-    toast("Probe captured " + captures.length + " (copied to clipboard)");
+    if (t && BAR_TEXT.test(t)) barSeen = true;
   }
 
-  function installProbe() {
+  function installBarDetector() {
     try {
       const JSX = findByProps("jsx", "jsxs");
       if (JSX) {
         ["jsx", "jsxs"].forEach(function (k) {
           if (typeof JSX[k] === "function") {
-            unpatches.push(before(k, JSX, function (args) { maybeCapture(args[1]); }));
+            unpatches.push(before(k, JSX, function (args) { markBar(args[1]); }));
           }
         });
       }
       if (React && typeof React.createElement === "function") {
         unpatches.push(
           before("createElement", React, function (args) {
-            maybeCapture(args[1], Array.prototype.slice.call(args, 2));
+            markBar(args[1], Array.prototype.slice.call(args, 2));
           })
         );
       }
-      status.probe = "on";
     } catch (e) {
-      status.probe = "error: " + e;
+      status.detector = "error: " + e;
     }
+  }
+
+  // Finds the module that exports a function with the given name
+  function findHolder(name) {
+    const modules = vendetta.metro.modules;
+    for (const id in modules) {
+      const mod = modules[id];
+      if (!mod || !mod.isInitialized) continue;
+      let exp;
+      try {
+        exp = mod.publicModule && mod.publicModule.exports;
+      } catch (e) {
+        continue;
+      }
+      if (!exp) continue;
+      try {
+        const d = exp.default;
+        if (typeof d === "function" && (d.displayName || d.name) === name) {
+          return { holder: exp, key: "default", id: id };
+        }
+        if (typeof exp === "object") {
+          const keys = Object.keys(exp);
+          for (let i = 0; i < keys.length; i++) {
+            const v = exp[keys[i]];
+            if (typeof v === "function" && (v.displayName || v.name) === name) {
+              return { holder: exp, key: keys[i], id: id };
+            }
+          }
+        }
+      } catch (e) {}
+    }
+    return null;
   }
 
   function applyPatches() {
@@ -221,29 +248,51 @@
       status.perm = "error: " + e;
     }
 
-    // 2) The "Done reading? Check out #channel" bar: block navigation, add an Unlock button
+    installBarDetector();
+
+    // 2) ChatInputGuard: draws the "Done reading?" bar instead of the chat box
     try {
-      const holder = findByProps("TextAreaCta");
-      if (holder && typeof holder.TextAreaCta === "function") {
+      let found = findHolder("ChatInputGuard");
+      if (!found) {
+        const m = vendetta.metro.findByName("ChatInputGuard", false);
+        if (m) found = { holder: m, key: "default", id: "findByName" };
+      }
+      if (found) {
         unpatches.push(
-          instead("TextAreaCta", holder, function (args, orig) {
-            lastSummary = summarize(args[0]);
-            const rest = Array.prototype.slice.call(args, 1);
-            const out = orig.apply(this, [overrideProps(args[0], 0)].concat(rest));
+          instead(found.key, found.holder, function (args, orig) {
+            const props = args[0];
+            lastSummary = summarize(props);
+            const wasArmed = armed;
+            armed = true;
+            barSeen = false;
+            let out;
+            try {
+              out = orig.apply(this, args);
+            } finally {
+              armed = wasArmed;
+            }
+            const blocked = barSeen;
+            barSeen = false;
+            if (!blocked) return out;
+
+            const id = currentChannelId();
+            if (id && unlocked[id]) {
+              // permission patch didn't remove the bar: show the real chat box ourselves
+              if (props && props.children != null) return props.children;
+              return out;
+            }
             return withUnlockButton(rewriteElement(out, 0));
           })
         );
-        status.cta = "patched";
+        status.guard = "patched";
       } else {
-        status.cta = holder ? "TextAreaCta is " + typeof holder.TextAreaCta : "not found";
+        status.guard = "ChatInputGuard not found";
       }
     } catch (e) {
-      status.cta = "error: " + e;
+      status.guard = "error: " + e;
     }
 
-    installProbe();
-
-    toast("SendAnyway: cta=" + status.cta + ", perm=" + status.perm + ", probe=" + status.probe);
+    toast("SendAnyway: guard=" + status.guard + ", perm=" + status.perm);
   }
 
   return {
@@ -252,6 +301,7 @@
         applyPatches();
       },
       onUnload: function () {
+        armed = false;
         unpatches.forEach(function (u) {
           try { u(); } catch (e) {}
         });
