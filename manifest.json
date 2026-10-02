@@ -3,6 +3,6 @@
   "description": "Finds the Done reading bar component (debug tool)",
   "authors": [{ "name": "Abas2" }],
   "main": "index.js",
-  "hash": "ef1ccc40aa869e59258e4ae187f6d04b4d9c99ed3974d9e40c6e813a98863f8a",
+  "hash": "30abd48bb5546a8d573121ef151639ddb4360096f6bca1de3fa302c0c4bd600d",
   "vendetta": { "icon": "ic_search" }
 }
