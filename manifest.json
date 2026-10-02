@@ -1,8 +1,8 @@
 {
-  "name": "Chat Bar Finder",
-  "description": "Finds the Done reading bar component (debug tool)",
+  "name": "Send Anyway",
+  "description": "Tap the Done reading bar 3 times to unlock the chat box in locked channels",
   "authors": [{ "name": "Abas2" }],
   "main": "index.js",
-  "hash": "ba5d8d9b2d43817fae077d2ca72a613d205b119da34f11770718ee90ad887c97",
-  "vendetta": { "icon": "ic_search" }
+  "hash": "6800ad0d46462b67893b097ef4ae0e148fb3f32d82b2e4df43c95052cb454f72",
+  "vendetta": { "icon": "ic_message" }
 }
